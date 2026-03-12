@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:data_bridge/transport/transport.dart';
+import 'package:comm_module/transport/transport.dart';
 
 class TcpTransport extends Transport {
   final String host;

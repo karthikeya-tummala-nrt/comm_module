@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
-import 'package:data_bridge/transport/transport.dart';
+import 'package:comm_module/transport/transport.dart';
 
 class UdpTransport extends Transport {
   final InternetAddress address;
