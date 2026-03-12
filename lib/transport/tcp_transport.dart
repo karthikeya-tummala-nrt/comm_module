@@ -8,6 +8,8 @@ class TcpTransport extends Transport {
   final String host;
   final int port;
   Socket? _tcpSocket;
+  bool _disposed = false;
+  StreamSubscription<Uint8List>? _tcpStreamSubscription;
   final StreamController<Uint8List> _dataStreamController =
       StreamController<Uint8List>.broadcast();
 
@@ -21,28 +23,35 @@ class TcpTransport extends Transport {
 
   @override
   Future<void> connect() async {
+    if (_disposed) throw StateError('Transport already disposed. Create a new object.');
+
     if (_tcpSocket != null) {
       throw StateError("Transport is already connected. Call close() first.");
     }
 
     try {
       _tcpSocket = await Socket.connect(host, port);
-      _tcpSocket!.listen(
+      _tcpStreamSubscription = _tcpSocket!.listen(
         (data) {
           _dataStreamController.add(data);
         },
+        onDone: () => close().catchError((e, s) {
+          print('Error during close() $e\n$s');
+        }),
         onError: _dataStreamController.addError,
-        onDone: close,
       );
     } catch (e) {
-      _tcpSocket = null;
+      await close();
       rethrow;
     }
   }
 
   @override
   Future<void> send(Uint8List data) async {
+    if (_disposed) throw StateError('Transport already disposed. Create a new object.');
+
     final socket = _tcpSocket;
+
     if (socket == null) {
       throw StateError(
         "Transport not connected. Call connect() before send().",
@@ -61,15 +70,17 @@ class TcpTransport extends Transport {
 
   @override
   Future<void> close() async {
-    if (_tcpSocket == null) return;
-
     final socket = _tcpSocket;
     _tcpSocket = null;
+    await _tcpStreamSubscription?.cancel();
+    _tcpStreamSubscription = null;
+    await socket?.close();
     socket?.destroy();
   }
 
   @override
   Future<void> dispose() async {
+    _disposed = true;
     await close();
     await _dataStreamController.close();
   }

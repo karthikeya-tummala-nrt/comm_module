@@ -14,6 +14,9 @@ class UdpTransport extends Transport {
   final StreamController<Uint8List> _dataStreamController =
       StreamController<Uint8List>.broadcast();
 
+  bool _disposed = false;
+  StreamSubscription<RawSocketEvent>? _udpStreamSubscription;
+
   UdpTransport({
     required this.address,
     required this.port,
@@ -29,41 +32,43 @@ class UdpTransport extends Transport {
 
   @override
   Future<void> connect() async {
-    if (_udpSocket != null) {
-      throw StateError("Transport already connected");
-    }
+    if (_disposed) throw StateError('Transport already disposed. Create a new object.');
+
+    if (_udpSocket != null) throw StateError("Transport already connected");
 
     try {
       _udpSocket = await RawDatagramSocket.bind(address, port);
-    } catch (e) {
-      throw StateError('Failed to bind UDP Socket: $e');
-    }
+      _udpStreamSubscription = _udpSocket!.listen(
+        (event) {
+          if (event == RawSocketEvent.read) {
+            Datagram? datagram;
+            while (true) {
+              datagram = _udpSocket!.receive();
+              if (datagram == null) break;
 
-    _udpSocket!.listen(
-      (event) {
-        if (event == RawSocketEvent.read) {
-          Datagram? datagram;
-          while (true) {
-            datagram = _udpSocket!.receive();
-            if (datagram == null) break;
-
-            if (!_dataStreamController.isClosed) {
-              _dataStreamController.add(datagram.data);
+              if (!_dataStreamController.isClosed) {
+                _dataStreamController.add(datagram.data);
+              }
             }
           }
-        }
-      },
-      onDone: () {
-        _udpSocket = null;
-        if (!_dataStreamController.isClosed) _dataStreamController.close();
-      },
-      onError: _dataStreamController.addError,
-    );
+        },
+        onDone: () => close().catchError((e, s) {
+          print('Error during close() $e\n$s');
+        }),
+        onError: _dataStreamController.addError,
+      );
+    } catch (e) {
+      await close();
+      rethrow;
+    }
   }
 
   @override
   Future<void> send(Uint8List data) async {
-    if (_udpSocket == null) {
+    if (_disposed) throw StateError('Transport already disposed. Create a new object.');
+
+    final socket = _udpSocket;
+    if (socket == null) {
       throw StateError(
         "Transport not connected. Call connect() before send().",
       );
@@ -75,22 +80,24 @@ class UdpTransport extends Transport {
       );
     }
 
-    _udpSocket!.send(data, remoteAddress!, remotePort!);
+    socket.send(data, remoteAddress!, remotePort!);
   }
 
   @override
   Future<void> close() async {
-    if (_udpSocket == null) return;
-
     final socket = _udpSocket;
     _udpSocket = null;
+
+    await _udpStreamSubscription?.cancel();
+    _udpStreamSubscription = null;
+
     socket?.close();
   }
 
   @override
   Future<void> dispose() async {
+    _disposed = true;
     await close();
     await _dataStreamController.close();
   }
-
 }
